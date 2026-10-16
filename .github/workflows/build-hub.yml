@@ -1,0 +1,54 @@
+# Build used by the zJu4nn Hub "Mashups" tab.
+# The BepInEx plugin compiles against the game's own assemblies (not redistributable), so this workflow takes the
+# upstream release dll, pinned by sha256 (zip AND dll — reviewed by the zJu4nn Hub), and repackages it for the Hub.
+# Upstream: https://github.com/dunnolole/rust-week-on-peak (MIT) — all credit to the original author.
+name: build-hub
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. hub-v1.0.0-1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      UP_URL: https://github.com/dunnolole/rust-week-on-peak/releases/download/v1.0.0/RustWeekOnPEAK-1.0.0.zip
+      UP_SHA256: cacba77fa48711ec885f48c8de1b505afaa328e969efc757800405e3441838b8
+      DLL_SHA256: 29235ceb0443f33663bb6b23ea6d182e9d6516f55da1cd55c08b513779911e84
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upstream plugin (pinned)
+        run: |
+          curl -fsSL -o up.zip "$UP_URL"
+          echo "$UP_SHA256  up.zip" | sha256sum -c -
+          mkdir up && (cd up && unzip -q ../up.zip || true)
+          dll=$(find up -iname 'RustWeekOnPEAK.dll' -o -iname '*RustWeekOnPEAK.dll' | head -1)
+          test -n "$dll" || { echo "dll not found"; find up; exit 1; }
+          echo "$DLL_SHA256  $dll" | sha256sum -c -
+          echo "DLL=$dll" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          p=pkg/BepInEx/plugins/RustWeekOnPEAK
+          mkdir -p "$p"
+          cp "$DLL" "$p/RustWeekOnPEAK.dll"
+          cp LICENSE "$p/LICENSE.txt"
+          printf '%s\n' "Rust Week on PEAK 1.0.0 (build do zJu4nn Hub)" "" "PEAK com os itens, icones e a sobrevivencia do Rust (lidos da SUA copia do Rust)." "Original de dunnolole (github.com/dunnolole/rust-week-on-peak). Licenca MIT." "Projeto de fas, sem ligacao com Aggro Crab, Landfall ou Facepunch." > pkg/LEIA.txt
+          (cd pkg && find . -type f ! -name SHA256SUMS.txt -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          zip="$(echo 'RustWeekOnPEAK' | tr 'A-Z' 'a-z')-hub-1.0.0.zip"
+          (cd pkg && zip -qrX "../$zip" .)
+          sha256sum "$zip"
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" "$ZIP" --repo "${{ github.repository }}" --title "Rust Week on PEAK 1.0.0 (zJu4nn Hub)" --notes "Repackage of dunnolole/rust-week-on-peak 1.0.0 for the zJu4nn Hub Mashups tab: upstream dll pinned by sha256 $DLL_SHA256. Workflow at ${{ github.sha }}. MIT."
